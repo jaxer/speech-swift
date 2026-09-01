@@ -1,6 +1,7 @@
 import Foundation
 import Hub
 import os
+import Synchronization
 
 /// Download errors
 public enum DownloadError: Error, LocalizedError {
@@ -143,7 +144,7 @@ public enum HuggingFaceDownloader {
         additionalFiles: [String] = [],
         offlineMode: Bool = false,
         retryDelaysSeconds: [Int]? = nil,
-        progressHandler: ((Double) -> Void)? = nil
+        progressHandler: (@Sendable (Double) -> Void)? = nil
     ) async throws {
         if offlineMode {
             guard weightsExist(in: directory) else {
@@ -236,7 +237,7 @@ public enum HuggingFaceDownloader {
         files: [String],
         offlineMode: Bool = false,
         retryDelaysSeconds: [Int]? = nil,
-        progressHandler: ((Double) -> Void)? = nil
+        progressHandler: (@Sendable (Double) -> Void)? = nil
     ) async throws {
         if files.isEmpty {
             progressHandler?(1.0)
@@ -323,7 +324,7 @@ public enum HuggingFaceDownloader {
         expectedSizes: [String: Int64]? = nil,
         offlineMode: Bool = false,
         retryDelaysSeconds: [Int]? = nil,
-        progressHandler: ((Double, Int64, Int64, String) -> Void)? = nil
+        progressHandler: (@Sendable (Double, Int64, Int64, String) -> Void)? = nil
     ) async throws {
         if files.isEmpty {
             progressHandler?(1.0, 0, 0, "")
@@ -379,7 +380,7 @@ public enum HuggingFaceDownloader {
         modelId: String,
         directory: URL,
         retryDelaysSeconds: [Int]?,
-        progressHandler: ((Double, Int64, Int64, String) -> Void)?,
+        progressHandler: (@Sendable (Double, Int64, Int64, String) -> Void)?,
         resolve: @escaping @Sendable () async throws -> [RepoFile]
     ) async throws {
         let delays = retryDelaysSeconds ?? downloadRetryDelaysSeconds
@@ -541,14 +542,13 @@ public enum HuggingFaceDownloader {
     }
 
     /// Thread-safe last-progress timestamp — progress may be reported from a
-    /// background task.
-    private final class ProgressClock: @unchecked Sendable {
-        private let lock = NSLock()
-        private var last = Date()
-        func tick() { lock.lock(); last = Date(); lock.unlock() }
+    /// background task. Backed by `Mutex`, a real compiler-checked lock, so
+    /// the class is genuinely `Sendable` rather than asserting it.
+    private final class ProgressClock: Sendable {
+        private let last = Mutex<Date>(Date())
+        func tick() { last.withLock { $0 = Date() } }
         func idleSeconds() -> Double {
-            lock.lock(); defer { lock.unlock() }
-            return Date().timeIntervalSince(last)
+            last.withLock { Date().timeIntervalSince($0) }
         }
     }
 
@@ -557,7 +557,7 @@ public enum HuggingFaceDownloader {
     static func withDownloadStallGuard(
         modelId: String,
         stallTimeoutSeconds: Int? = nil,
-        _ operation: @escaping (@escaping @Sendable (Double) -> Void) async throws -> Void
+        _ operation: @escaping @Sendable (@escaping @Sendable (Double) -> Void) async throws -> Void
     ) async throws {
         let stall = stallTimeoutSeconds ?? downloadStallTimeoutSeconds
         let clock = ProgressClock()

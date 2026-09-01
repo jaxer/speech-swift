@@ -150,7 +150,7 @@ public class Qwen3Tokenizer {
 
     /// Byte-to-unicode mapping table (GPT-2 style)
     /// Built lazily on first use
-    private static var byteToUnicode: [UInt8: Character] = {
+    private static let byteToUnicode: [UInt8: Character] = {
         var mapping: [UInt8: Character] = [:]
         var n = 0
 
@@ -179,7 +179,7 @@ public class Qwen3Tokenizer {
     }()
 
     /// Unicode-to-byte reverse mapping
-    private static var unicodeToByte: [Character: UInt8] = {
+    private static let unicodeToByte: [Character: UInt8] = {
         var reverse: [Character: UInt8] = [:]
         for (byte, char) in byteToUnicode {
             reverse[char] = byte

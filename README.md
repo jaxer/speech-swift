@@ -1,5 +1,18 @@
 # Speech Swift
 
+> **This is a stripped fork.** [jaxer/speech-swift](https://github.com/jaxer/speech-swift), branch
+> `dicta-strip`, forked from [soniqo/speech-swift](https://github.com/soniqo/speech-swift) at tag
+> `v0.0.26` (commit `f9af2f34d196eacca85d13fe508d8ed71919671f`). `Package.swift` here keeps only the
+> `Qwen3ASR` product and the `Qwen3ASR` / `AudioCommon` / `MLXCommon` targets it needs, with their two
+> package dependencies (`mlx-swift`, `swift-transformers`); every other target, product, and
+> dependency described below (TTS, other ASR engines, VAD, diarization, the Hummingbird server, the
+> MCP tool, WhisperKit, benchmarks, CLIs, and their source and test directories) has been deleted.
+> Everything that remains compiles under Swift 6 language mode with no concurrency escape hatches.
+> This fork exists to feed a single private consumer; the rest of this README, including the
+> "Built with Speech Swift" list and every model this fork no longer ships, is unchanged from
+> upstream and describes the original, full project. Licensed Apache-2.0, same as upstream — see
+> [LICENSE](LICENSE); upstream copyright and license terms are unmodified.
+
 AI speech models for Apple Silicon, powered by MLX Swift and CoreML.
 
 📖 Read in: [English](README.md) · [中文](README_zh.md) · [日本語](README_ja.md) · [한국어](README_ko.md) · [Español](README_es.md) · [Deutsch](README_de.md) · [Français](README_fr.md) · [हिन्दी](README_hi.md) · [Português](README_pt.md) · [Русский](README_ru.md) · [العربية](README_ar.md) · [Tiếng Việt](README_vi.md) · [Türkçe](README_tr.md) · [ไทย](README_th.md)

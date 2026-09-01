@@ -92,7 +92,7 @@ public final class CoreMLForcedAligner {
         decoderComputeUnits: MLComputeUnits = CoreMLComputeUnitsResolver.resolved(default: .all),
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: (@Sendable (Double, String) -> Void)? = nil
     ) async throws -> CoreMLForcedAligner {
         let dir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
 

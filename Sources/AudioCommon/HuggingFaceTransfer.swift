@@ -20,7 +20,7 @@ extension HuggingFaceDownloader {
         _ files: [RepoFile],
         modelId: String,
         to directory: URL,
-        progressHandler: ((Double, Int64, Int64, String) -> Void)?
+        progressHandler: (@Sendable (Double, Int64, Int64, String) -> Void)?
     ) async throws {
         let totalBytes = files.reduce(Int64(0)) { $0 + $1.size }
         var completedBytes: Int64 = 0
@@ -157,7 +157,7 @@ extension HuggingFaceDownloader {
         stagingRoot: URL,
         completedBeforeFile: Int64,
         totalBytes: Int64,
-        progressHandler: ((Double, Int64, Int64, String) -> Void)?
+        progressHandler: (@Sendable (Double, Int64, Int64, String) -> Void)?
     ) async throws {
         let staging = try stagingURL(for: file.path, in: stagingRoot)
         let sidecar = staging.appendingPathExtension("chunks")
@@ -312,7 +312,7 @@ extension HuggingFaceDownloader {
         completedBytes: Int64,
         totalBytes: Int64,
         fileName: String,
-        progressHandler: ((Double, Int64, Int64, String) -> Void)?
+        progressHandler: (@Sendable (Double, Int64, Int64, String) -> Void)?
     ) {
         guard totalBytes > 0 else {
             progressHandler?(1.0, completedBytes, totalBytes, fileName)
@@ -460,7 +460,7 @@ actor RangedDownloadProgress {
     private let completedBeforeFile: Int64
     private let totalBytes: Int64
     private let fileName: String
-    private let progressHandler: ((Double, Int64, Int64, String) -> Void)?
+    private let progressHandler: (@Sendable (Double, Int64, Int64, String) -> Void)?
     private var fileCompletedBytes: Int64 = 0
     private var lastReportedMegabytes: Int64 = -1
 
@@ -468,7 +468,7 @@ actor RangedDownloadProgress {
         completedBeforeFile: Int64,
         totalBytes: Int64,
         fileName: String,
-        progressHandler: ((Double, Int64, Int64, String) -> Void)?
+        progressHandler: (@Sendable (Double, Int64, Int64, String) -> Void)?
     ) {
         self.completedBeforeFile = completedBeforeFile
         self.totalBytes = totalBytes

@@ -140,7 +140,7 @@ public class CoreMLTextDecoder {
         computeUnits: MLComputeUnits = CoreMLComputeUnitsResolver.resolved(default: .cpuAndNeuralEngine),
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: (@Sendable (Double, String) -> Void)? = nil
     ) async throws -> CoreMLTextDecoder {
         let cacheDir = try cacheDir ?? HuggingFaceDownloader.getCacheDirectory(for: modelId)
 

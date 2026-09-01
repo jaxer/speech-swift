@@ -1221,7 +1221,7 @@ public extension Qwen3ASRModel {
         modelId: String = "aufklarer/Qwen3-ASR-0.6B-MLX-4bit",
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: (@Sendable (Double, String) -> Void)? = nil
     ) async throws -> Qwen3ASRModel {
         progressHandler?(0.0, "Downloading model...")
 

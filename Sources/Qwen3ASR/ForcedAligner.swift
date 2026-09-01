@@ -402,7 +402,7 @@ public extension Qwen3ForcedAligner {
         modelId: String = "aufklarer/Qwen3-ForcedAligner-0.6B-4bit",
         cacheDir: URL? = nil,
         offlineMode: Bool = false,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: (@Sendable (Double, String) -> Void)? = nil
     ) async throws -> Qwen3ForcedAligner {
         progressHandler?(0.0, "Downloading model...")
 
