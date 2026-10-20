@@ -1,8 +1,8 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Stripped for dicta (https://github.com/jaxer/dicta, private): keeps only the Qwen3ASR product
-// and the two targets it needs (AudioCommon, MLXCommon). Everything else upstream soniqo/speech-swift
+// Stripped for dicta (https://github.com/jaxer/dicta, private): keeps only the Qwen3ASR and Qwen3TTS
+// products and the two targets they need (AudioCommon, MLXCommon). Everything else upstream soniqo/speech-swift
 // ships — every TTS/other-ASR/benchmark/server/CLI/MCP target, SpeechCore, SpeechVAD, and their
 // dependencies (hummingbird, swift-nio, swift-sdk, WhisperKit, mlx-swift-lm, swift-system,
 // swift-argument-parser) — has been removed. See README.md for upstream provenance.
@@ -21,6 +21,10 @@ let package = Package(
         .library(
             name: "Qwen3ASR",
             targets: ["Qwen3ASR"]
+        ),
+        .library(
+            name: "Qwen3TTS",
+            targets: ["Qwen3TTS"]
         )
     ],
     dependencies: [
@@ -48,6 +52,17 @@ let package = Package(
         ),
         .target(
             name: "Qwen3ASR",
+            dependencies: [
+                "AudioCommon",
+                "MLXCommon",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "MLXFast", package: "mlx-swift")
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "Qwen3TTS",
             dependencies: [
                 "AudioCommon",
                 "MLXCommon",
