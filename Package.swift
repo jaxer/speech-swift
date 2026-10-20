@@ -71,6 +71,16 @@ let package = Package(
                 .product(name: "MLXFast", package: "mlx-swift")
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "Qwen3TTSTests",
+            dependencies: [
+                "Qwen3TTS",
+                "AudioCommon",
+                .product(name: "MLX", package: "mlx-swift")
+            ],
+            resources: [.copy("Resources/tovarisch.wav")],
+            swiftSettings: [.swiftLanguageMode(.v6)]
         )
     ]
 )

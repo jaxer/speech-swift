@@ -48,7 +48,7 @@ public class CausalConv1d: Module {
 
 // MARK: - Causal Transposed Conv1d
 
-/// ConvTransposed1d with right trimming for causality
+/// ConvTransposed1d with right trimming for causality: `T` frames in, exactly `T * stride` out.
 public class CausalTransposeConv1d: Module {
     @ModuleInfo var conv: ConvTransposed1d
     let trimRight: Int
@@ -353,6 +353,7 @@ public class DecoderTransformer: Module {
     @ModuleInfo var outputProj: Linear
 
     public init(config: SpeechTokenizerDecoderConfig) {
+        self.slidingWindow = config.slidingWindow
         // Project from latentDim(1024) to hiddenSize(512) for transformer
         self._inputProj.wrappedValue = Linear(config.latentDim, config.hiddenSize)
         self._layers.wrappedValue = (0..<config.numLayers).map { _ in
@@ -365,16 +366,20 @@ public class DecoderTransformer: Module {
         super.init()
     }
 
+    let slidingWindow: Int
+
     public func callAsFunction(_ x: MLXArray) -> MLXArray {
         var h = inputProj(x)  // [B, T, 1024] -> [B, T, 512]
 
-        // Build causal mask for sequences longer than 1 (matches Python's create_additive_causal_mask)
+        // Every layer is sliding-window causal attention (the checkpoint's `layer_types`): frame i
+        // attends to frames i-slidingWindow+1...i, so a long one-pass decode sees what training saw.
         let seqLen = h.dim(1)
         let mask: MLXArray?
         if seqLen > 1 {
             let rows = MLXArray(0..<Int32(seqLen)).expandedDimensions(axis: 1)
             let cols = MLXArray(0..<Int32(seqLen)).expandedDimensions(axis: 0)
-            mask = MLX.where(cols .> rows, MLXArray(Float(-1e9)), MLXArray(Float(0)))
+            let hidden = (cols .> rows) .|| (rows - cols .>= MLXArray(Int32(slidingWindow)))
+            mask = MLX.where(hidden, MLXArray(Float(-1e9)), MLXArray(Float(0)))
                 .expandedDimensions(axes: [0, 1])
                 .asType(h.dtype)
         } else {
@@ -539,6 +544,9 @@ public class SplitResidualVectorQuantizer: Module {
 public class SpeechTokenizerDecoder: Module {
     public let config: SpeechTokenizerDecoderConfig
 
+    /// Every decode of N frames returns exactly `N * samplesPerFrame` samples.
+    public var samplesPerFrame: Int { config.samplesPerFrame }
+
     @ModuleInfo var splitRVQ: SplitResidualVectorQuantizer
 
     // Pre-conv: hiddenSize(512) -> latentDim(1024)
@@ -563,8 +571,8 @@ public class SpeechTokenizerDecoder: Module {
     @ModuleInfo var finalSnake: SnakeBeta
     @ModuleInfo var finalConv: CausalConv1d
 
-    /// Compiled decoder forward pass for kernel fusion. Uses shapeless=false since
-    /// most chunks have a fixed size [1, 16, 35]. Different sizes retrace automatically.
+    /// Compiled decoder forward pass for kernel fusion. Uses shapeless=false, so each new input
+    /// length retraces once.
     private var compiledDecoder: (([MLXArray]) -> [MLXArray])?
 
     public init(config: SpeechTokenizerDecoderConfig) {
@@ -581,15 +589,18 @@ public class SpeechTokenizerDecoder: Module {
         // Transformer (8 layers with 512-dim bottleneck)
         self._transformer.wrappedValue = DecoderTransformer(config: config)
 
-        // Pre-upsample stages: latentDim -> latentDim (2x each)
+        // Pre-upsample stages: latentDim -> latentDim (2x each). The kernel is the factor itself,
+        // as in the checkpoint (`decoder.upsample.{0,1}.0.conv.weight` is [1024, 1024, 2]), so there
+        // is nothing to trim. A kernel of 2x the factor trimmed 2 frames the loaded weights never
+        // produced, at each stage: every decode came out 2880 samples (1.5 codec frames) short.
         let latent = config.latentDim
         self._preUpsample1.wrappedValue = CausalTransposeConv1d(
             inputChannels: latent, outputChannels: latent,
-            kernelSize: config.upsamplingRatios[0] * 2, stride: config.upsamplingRatios[0])
+            kernelSize: config.upsamplingRatios[0], stride: config.upsamplingRatios[0])
         self._preConvNeXt1.wrappedValue = ConvNeXtBlock(dim: latent)
         self._preUpsample2.wrappedValue = CausalTransposeConv1d(
             inputChannels: latent, outputChannels: latent,
-            kernelSize: config.upsamplingRatios[1] * 2, stride: config.upsamplingRatios[1])
+            kernelSize: config.upsamplingRatios[1], stride: config.upsamplingRatios[1])
         self._preConvNeXt2.wrappedValue = ConvNeXtBlock(dim: latent)
 
         // Input conv: latentDim -> decoderDim
@@ -620,9 +631,7 @@ public class SpeechTokenizerDecoder: Module {
 
     /// Set up compiled decoder forward pass for Metal kernel fusion.
     ///
-    /// With shapeless=false, the compiled graph is traced once per input shape
-    /// and cached. Most decode chunks share the shape [1, 16, 35], so the graph
-    /// is reused across chunks. Different sizes (e.g., last chunk) retrace once.
+    /// With shapeless=false, the compiled graph is traced once per input shape and cached.
     public func setupCompilation() {
         let selfRef = self
 
@@ -643,9 +652,8 @@ public class SpeechTokenizerDecoder: Module {
         return callAsFunction(codes)
     }
 
-    /// Warm up the compiled decoder with a dummy forward pass.
-    /// Pre-traces the graph for the common chunk shape [1, 16, 35] and
-    /// compiles Metal shaders so subsequent decodes pay zero compilation cost.
+    /// Warm up the compiled decoder with a dummy forward pass, compiling the Metal shaders so later
+    /// decodes do not pay for them.
     public func warmUp() {
         guard compiledDecoder != nil else { return }
 
@@ -684,21 +692,19 @@ public class SpeechTokenizerDecoder: Module {
         h = finalConv(h)
         h = clip(h, min: -1.0, max: 1.0)
 
-        return h  // [B, T*1920, 1]
+        return h  // [B, T * samplesPerFrame, 1]
     }
 
-    /// Chunked decode: process codec frames in overlapping chunks to reduce O(T²) attention cost.
-    /// Mirrors Python's `chunked_decode(codes, chunk_size=25, left_context=10)`.
+    /// Decode codec frames in chunks of `chunkSize`, each with up to `leftContext` frames of left
+    /// context, as the official tokenizer's `chunked_decode(codes, chunk_size=300,
+    /// left_context_size=25)` does. Up to `chunkSize` frames are decoded in one pass.
     ///
-    /// Each chunk processes `leftContext + chunkSize` frames through the full decoder pipeline.
-    /// Only the last `chunkSize * samplesPerFrame` samples are kept (overlap is trimmed).
-    /// All convolutions are causal (left-padded), so chunks produce correct output with left context.
-    public func chunkedDecode(codes: MLXArray, chunkSize: Int = 25, leftContext: Int = 10) -> MLXArray {
+    /// Each chunk's decode is exactly `frames * samplesPerFrame` samples, so dropping
+    /// `context * samplesPerFrame` from its front keeps exactly the chunk's own audio.
+    public func chunkedDecode(codes: MLXArray, chunkSize: Int = 300, leftContext: Int = 25) -> MLXArray {
         let numFrames = codes.dim(2)  // [B, 16, T]
-        let samplesPerFrame = 1920    // 24000 / 12.5
 
-        if numFrames <= chunkSize + leftContext {
-            // Short enough to decode in one pass
+        if numFrames <= chunkSize {
             return executeDecoder(codes)
         }
 
@@ -707,22 +713,14 @@ public class SpeechTokenizerDecoder: Module {
         var offset = 0
         while offset < numFrames {
             let chunkEnd = min(offset + chunkSize, numFrames)
-            let contextStart = max(offset - leftContext, 0)
-            let actualContext = offset - contextStart
+            let context = min(leftContext, offset)
 
-            let chunkCodes = codes[0..., 0..., contextStart..<chunkEnd]  // [B, 16, contextFrames + chunkFrames]
-            let chunkWaveform = executeDecoder(chunkCodes)  // [B, T_samples, 1]
-
-            // Trim left context samples — clamp to actual output length because
-            // convolutional boundary effects can make the decoder produce fewer
-            // samples than (inputFrames * samplesPerFrame), especially on short last chunks.
-            let trimSamples = min(actualContext * samplesPerFrame, chunkWaveform.dim(1))
-            let totalSamples = chunkWaveform.dim(1)
-            guard trimSamples < totalSamples else {
-                offset = chunkEnd
-                continue
-            }
-            let kept = chunkWaveform[0..., trimSamples..<totalSamples, 0...]
+            let chunkCodes = codes[0..., 0..., (offset - context)..<chunkEnd]  // [B, 16, context + chunk]
+            let chunkWaveform = executeDecoder(chunkCodes)  // [B, (context + chunk) * samplesPerFrame, 1]
+            let kept = chunkWaveform[0..., (context * samplesPerFrame)..., 0...]
+            precondition(
+                kept.dim(1) == (chunkEnd - offset) * samplesPerFrame,
+                "a \(chunkEnd - offset)-frame chunk decoded to \(kept.dim(1)) samples")
 
             // Eval each chunk to free intermediate decoder tensors (480x upsample).
             // Without this, all chunks' intermediates stay in memory as lazy graph nodes.
@@ -735,12 +733,16 @@ public class SpeechTokenizerDecoder: Module {
         return concatenated(audioChunks, axis: 1)
     }
 
-    /// Convert codes to float audio samples using chunked decoding + bulk extraction
+    /// Convert codes to float audio samples: exactly `codes.dim(2) * samplesPerFrame` of them.
     public func decode(codes: MLXArray) -> [Float] {
         let waveform = chunkedDecode(codes: codes)
         let flat = waveform.squeezed()
         eval(flat)
-        return flat.asArray(Float.self)
+        let samples = flat.asArray(Float.self)
+        precondition(
+            samples.count == codes.dim(2) * samplesPerFrame,
+            "\(codes.dim(2)) frames decoded to \(samples.count) samples")
+        return samples
     }
 
     /// Decode multiple items sequentially via existing `decode()`.

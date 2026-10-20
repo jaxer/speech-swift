@@ -170,6 +170,10 @@ public struct SpeechTokenizerDecoderConfig: Codable, Sendable {
     public var frameRate: Double = 12.5
     public var rmsNormEps: Float = 1e-8
 
+    /// Audio samples per codec frame: the product of every upsampling stage (2·2·8·5·4·3 = 1920,
+    /// the checkpoint's `decode_upsample_rate`). A decode of N frames is exactly N × this.
+    public var samplesPerFrame: Int { (upsamplingRatios + upsampleRates).reduce(1, *) }
+
     public init() {}
 }
 

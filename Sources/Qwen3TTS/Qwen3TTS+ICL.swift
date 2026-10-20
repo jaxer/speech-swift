@@ -56,8 +56,8 @@ extension Qwen3TTSModel {
     ///
     /// The reference codec (from the encoder) is supplied as in-context conditioning, so
     /// the model generates the TARGET codec only. For decoding, the reference codec is
-    /// prepended (the causal Mimi decoder needs left context) and then cut back off by the
-    /// exact `refFrames / totalFrames` audio ratio — leaving clean target audio. Pass
+    /// prepended (the causal Mimi decoder needs left context) and then cut back off: exactly
+    /// `refFrames * samplesPerFrame` samples — leaving clean target audio. Pass
     /// `trimReference: false` to receive the full decoded waveform (reference + target).
     ///
     /// - Parameters:
@@ -69,8 +69,8 @@ extension Qwen3TTSModel {
     ///   - sampling: Sampling config
     ///   - codecEncoder: SpeechTokenizerEncoder from fromPretrainedWithEncoder()
     ///   - trimReference: When `true` (default), prepend the reference codec for the decode
-    ///                    and cut the reference portion (`refFrames / totalFrames` of the
-    ///                    audio) off the front, returning only the target audio. Set `false` to
+    ///                    and cut the reference portion (`refFrames * samplesPerFrame` samples)
+    ///                    off the front, returning only the target audio. Set `false` to
     ///                    receive the raw decoded waveform.
     public func synthesizeWithVoiceCloneICL(
         text: String,
@@ -187,8 +187,8 @@ extension Qwen3TTSModel {
         // The talker now generates the TARGET codec only (the encoder produces the
         // correct reference codec, so the model continues past it instead of re-
         // speaking it). The Mimi decoder is causal and needs left context, so we
-        // prepend the exact reference codec for the decode and then cut the leading
-        // `refFrames / totalFrames` fraction of audio — the part the reference
+        // prepend the exact reference codec for the decode, in one pass, and then cut the
+        // leading `refFrames * samplesPerFrame` samples — exactly the part the reference
         // codec produced — leaving clean target audio with no echo and no clipping.
         let refFrames = refCodes.dim(2)
         let codesForDecode = trimReference
@@ -202,9 +202,8 @@ extension Qwen3TTSModel {
 
         let trimmedWaveform: [Float]
         if trimReference && totalFrames > 0 {
-            let cut = refFrames * fullWaveform.count / totalFrames
-            trimmedWaveform = (cut > 0 && cut < fullWaveform.count)
-                ? Array(fullWaveform.dropFirst(cut)) : fullWaveform
+            let cut = refFrames * codecDecoder.samplesPerFrame
+            trimmedWaveform = Array(fullWaveform.dropFirst(cut))
             AudioLog.inference.debug(
                 "ICL: cut \(cut, privacy: .public) reference samples (~\(String(format: "%.2f", Double(cut)/24000.0), privacy: .public)s, \(refFrames, privacy: .public)/\(totalFrames, privacy: .public) frames) from output start")
         } else {

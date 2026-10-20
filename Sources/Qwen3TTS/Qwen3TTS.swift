@@ -231,7 +231,7 @@ public class Qwen3TTSModel {
         }
 
         // Stage 4: Codec decode to waveform
-        let outputSamples = numFrames * 1920
+        let outputSamples = numFrames * codecDecoder.samplesPerFrame
         AudioLog.inference.debug(
             "Decoding \(numFrames, privacy: .public) frames -> \(outputSamples, privacy: .public) samples (\(String(format: "%.1f", Double(outputSamples) / 24000.0), privacy: .public)s)")
         let waveform = codecDecoder.decode(codes: allCodebooks)
@@ -338,7 +338,7 @@ public class Qwen3TTSModel {
         }
 
         // Stage 4: Codec decode to waveform
-        let outputSamples = numFrames * 1920
+        let outputSamples = numFrames * codecDecoder.samplesPerFrame
         AudioLog.inference.debug(
             "Decoding \(numFrames, privacy: .public) frames -> \(outputSamples, privacy: .public) samples (\(String(format: "%.1f", Double(outputSamples) / 24000.0), privacy: .public)s)")
         let waveform = codecDecoder.decode(codes: allCodebooks)
@@ -437,7 +437,7 @@ public class Qwen3TTSModel {
         var cappedSampling = sampling
         cappedSampling.maxTokens = maxTokenCap(for: [text], tokenizer: tokenizer, sampling: sampling)
         let safeMaxTokens = cappedSampling.maxTokens
-        let samplesPerFrame = 1920  // 24000 / 12.5
+        let samplesPerFrame = codecDecoder.samplesPerFrame
 
         // Stage 1: Prepare embeddings (identical to synthesize)
         let textTokens = prepareTextTokens(text: text, tokenizer: tokenizer)
@@ -697,10 +697,8 @@ public class Qwen3TTSModel {
         // Decode through codec (uses compiled path when available)
         let waveform = codecDecoder.executeDecoder(codes)  // [1, T_samples, 1]
 
-        // Keep the last `realChunkFrames * samplesPerFrame` samples from the decoder output.
-        // The decoder has a ~2880-sample startup overhead (causal conv warmup), so trimming
-        // from the left by `(zeroPad + context) * samplesPerFrame` can overshoot. Instead,
-        // compute the desired output size and trim from the right side of the waveform.
+        // Keep the last `realChunkFrames * samplesPerFrame` samples from the decoder output,
+        // which is exactly `(zeroPad + context) * samplesPerFrame` samples longer.
         let realChunkFrames = chunkEnd - chunkStart
         let expectedKept = realChunkFrames * samplesPerFrame
         let totalSamples = waveform.dim(1)
@@ -876,7 +874,7 @@ public class Qwen3TTSModel {
                 continue
             }
             let codes = allCodebooksList[i]  // [1, 16, Ti]
-            let outputSamples = numFrames * 1920
+            let outputSamples = numFrames * codecDecoder.samplesPerFrame
             AudioLog.inference.debug(
                 "Batch item \(i, privacy: .public): decoding \(numFrames, privacy: .public) frames -> \(outputSamples, privacy: .public) samples (\(String(format: "%.1f", Double(outputSamples) / 24000.0), privacy: .public)s)")
             let waveform = codecDecoder.decode(codes: codes)
